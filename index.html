@@ -13,7 +13,10 @@
 
     document.getElementById('connect').addEventListener('click', async () => {
       try {
-        device = await navigator.bluetooth.requestDevice({acceptAllDevices: true});
+        device = await navigator.bluetooth.requestDevice({
+            acceptAllDevices: true,
+            optionalServices: ['cae55316-6575-413c-9858-0f76c95f6590']
+        });
         const server = await device.gatt.connect();
         console.log("server is connected")
         const service = await server.getPrimaryService('cae55316-6575-413c-9858-0f76c95f6590');
