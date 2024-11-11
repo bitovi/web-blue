@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Arduino Light Control</title>
+</head>
+<body>
+  <button id="connect">Connect</button>
+  <button id="toggleLight">Toggle Light</button>
+  <script>
+    let device;
+    let characteristic;
+
+    document.getElementById('connect').addEventListener('click', async () => {
+      try {
+        device = await navigator.bluetooth.requestDevice({acceptAllDevices: true});
+        const server = await device.gatt.connect();
+        console.log("server is connected")
+        const service = await server.getPrimaryService('cae55316-6575-413c-9858-0f76c95f6590');
+        console.log("service is connected")
+        characteristic = await service.getCharacteristic('bd13c171-c34c-46ef-9078-70fd20719d31');
+        alert('Connected!');
+      } catch (error) {
+        console.error('Error:', error);
+      }
+    });
+
+    document.getElementById('toggleLight').addEventListener('click', async () => {
+      if (characteristic) {
+        const value = await characteristic.readValue();
+        const newValue = value.getUint8(0) === 0 ? 1 : 0;
+        await characteristic.writeValue(new Uint8Array([newValue]));
+      }
+    });
+  </script>
+</body>
+</html>
