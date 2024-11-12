@@ -3,38 +3,182 @@
 <head>
   <meta charset="UTF-8">
   <title>Arduino Light Control</title>
+  <style>
+    #red {border: solid 5px red;}
+    #red.on {background-color: red;}
+    #yellow {border: solid 5px yellow;}
+    #yellow.on {background-color: yellow;}
+    #blue {border: solid 5px blue;}
+    #blue.on {background-color: blue;}
+    #green {border: solid 5px green;}
+    #green.on {background-color: green;}
+    button {
+      font-size:80px;
+      padding: 20px;
+    }
+  </style>
 </head>
 <body>
   <button id="connect">Connect</button>
-  <button id="toggleLight">Toggle Light</button>
+
+  <div id="controls" style="display:none">
+    <button id="red" data-num="1">RED</button>
+    <button id="yellow" data-num="2">YELLOW</button>
+    <button id="blue" data-num="4">BLUE</button>
+    <button id="green" data-num="8">GREEN</button>
+  </div>
+  <img src="./hand-pointer-svgrepo-com.svg" style="width: 100px; height: 100px; display: none" id="pointer"/>
   <script>
     let device;
     let characteristic;
+    let currentColorValue;
 
     document.getElementById('connect').addEventListener('click', async () => {
       try {
+        //const btPermission = await navigator.permissions.query({ name: "bluetooth" });
+        //if (btPermission.state !== "denied") {
+        //    console.log("HELLO YES")
+        //}
+
+
         device = await navigator.bluetooth.requestDevice({
-            acceptAllDevices: true,
-            optionalServices: ['cae55316-6575-413c-9858-0f76c95f6590']
+          filters: [{services: ['cae55316-6575-413c-9858-0f76c95f6590']}]});
+
+        device.addEventListener('gattserverdisconnected', () => {
+          controls.style.display = "none";
+          connect.style.display = "block";
         });
+
         const server = await device.gatt.connect();
         console.log("server is connected")
         const service = await server.getPrimaryService('cae55316-6575-413c-9858-0f76c95f6590');
-        console.log("service is connected")
+        console.log("service is connected");
+
+        setupJoystick(service);
         characteristic = await service.getCharacteristic('bd13c171-c34c-46ef-9078-70fd20719d31');
-        alert('Connected!');
+
+        const colors = await getColors();
+        updateColors(colors);
+
+        controls.style.display = "block";
+        connect.style.display = "none";
+
       } catch (error) {
         console.error('Error:', error);
       }
     });
 
-    document.getElementById('toggleLight').addEventListener('click', async () => {
-      if (characteristic) {
-        const value = await characteristic.readValue();
-        const newValue = value.getUint8(0) === 0 ? 1 : 0;
-        await characteristic.writeValue(new Uint8Array([newValue]));
+    async function getColors(){
+      const value = await characteristic.readValue();
+      const bitmask = value.getUint8(0);
+      return bitmaskToColors(bitmask);
+    }
+    function bitmaskToColors(bitmask){
+      return {
+        red: !!(bitmask & 1),
+        yellow: !!(bitmask & 2),
+        blue: !!(bitmask & 4),
+        green: !!(bitmask & 8),
       }
-    });
+    }
+    function colorsToBitMask(colors){
+      return (colors.red ? 1 : 0)+
+        2*(colors.yellow ? 1 : 0)+
+        4*(colors.blue ? 1 : 0)+
+        8*(colors.green ? 1 : 0)
+    }
+
+    function updateColors(colors){
+      Object.keys(colors).forEach((color) => {
+        const show = colors[color];
+        const el = document.getElementById(color);
+        if( show ){
+          el.classList.add("on");
+        } else {
+          el.classList.remove("on");
+        }
+      })
+    }
+    document.getElementById('controls').addEventListener('click', async (event) => {
+      const maskString = event.target.getAttribute("data-num");
+      if(maskString) {
+        const maskNumber = parseInt(maskString, 10);
+        const colors = await getColors();
+        const isOn = event.target.classList.contains("on");
+        let newValue;
+        if(isOn) {
+          const clearMask = ~maskNumber;
+          newValue = colorsToBitMask(colors) & clearMask;
+        } else {
+          newValue = colorsToBitMask(colors) | maskNumber;
+        }
+        await characteristic.writeValue(new Uint8Array([newValue]));
+        updateColors(bitmaskToColors(newValue) );
+      }
+    })
+
+
+    async function setupJoystick(service) {
+      const characteristic = await service.getCharacteristic('629e077d-fa31-47b1-a681-a0fe99dd8493');
+      const result = await characteristic.startNotifications();
+      characteristic.addEventListener('characteristicvaluechanged', handleJoystickNotification);
+      pointer.style.display = "block"
+      pointer.style.position = "fixed";
+    }
+    let lastPressedValue = 0;
+
+    function handleJoystickNotification(event) {
+      const value = event.target.value;
+      
+      // Decode x and y values from the 4-byte array
+      const xReadValue = value.getUint16(0, true); // Little-endian, start at byte 0
+      const yReadValue = value.getUint16(2, true); // Little-endian, start at byte 2
+      const buttonState = value.getUint8(4);
+
+      const xValue = yReadValue;
+      const yValue = 1023 - xReadValue;
+      
+      const widthOfPointer = 40 / window.innerWidth;
+      const heightOfPointer = 0 / window.innerHeight;
+      
+
+      //console.log('Joystick x:', xValue, 'y:', yValue);
+      // Here you can update the UI or handle joystick movements
+      const leftPercent = ( (xValue / 1023 - widthOfPointer));
+      const rightPercent = (yValue / 1023 - heightOfPointer)
+      pointer.style.left = leftPercent*100 +"%";
+      pointer.style.top = rightPercent*100 +"%"
+
+      if(lastPressedValue !== buttonState) {
+        lastPressedValue = buttonState;
+        if(buttonState === 1) {
+          
+          triggerClick( (xValue / 1023) *  window.innerWidth, (yValue / 1023) *  window.innerHeight  )
+        }
+      }
+    }
+
+    function triggerClick(x, y) {
+      // Create a new mouse event
+      const clickEvent = new MouseEvent('click', {
+          bubbles: true,
+          cancelable: true,
+          clientX: x,
+          clientY: y,
+          view: window
+      });
+
+      // Find the element at the specified coordinates
+      const elements = document.elementsFromPoint(x, y);
+      element = elements.filter( e => e !== pointer)[0];
+      console.log("trying to click", x, y, element);
+      // Dispatch the click event on the element if it exists
+      if (element) {
+          element.dispatchEvent(clickEvent);
+      } else {
+          console.warn("No element found at specified coordinates.");
+      }
+  }
   </script>
 </body>
 </html>
